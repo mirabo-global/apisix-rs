@@ -41,6 +41,7 @@ impl ResponseError for XUserInfoError {
     }
 }
 
+#[derive(Debug)]
 pub struct XUserInfo<T>(T)
 where
     T: DeserializeOwned;
