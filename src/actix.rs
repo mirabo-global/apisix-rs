@@ -1,17 +1,20 @@
 use std::future::{Ready, ready};
 
 use actix_web::{
-    FromRequest, HttpRequest, HttpResponse, ResponseError, dev::Payload, http::header::ContentType,
+    FromRequest, HttpRequest, HttpResponse, ResponseError, dev::Payload,
 };
 use serde::de::DeserializeOwned;
+use serde_json::json;
 
 use crate::{X_USER_INFO_HEADER, error::XUserInfoError, user_info::XUserInfo};
 
 impl ResponseError for XUserInfoError {
     fn error_response(&self) -> HttpResponse {
+        let error_json = json!({
+            "error": self.to_string()
+        });
         HttpResponse::build(self.status_code())
-            .insert_header(ContentType::plaintext())
-            .body(self.to_string())
+            .json(error_json)
     }
 
     fn status_code(&self) -> actix_web::http::StatusCode {
@@ -153,5 +156,20 @@ mod tests {
         // Test deref
         assert_eq!(x_user_info.sub, "test sub");
         assert_eq!(x_user_info.name, "test name");
+    }
+
+    #[actix_rt::test]
+    async fn test_error_response() {
+        use actix_web::ResponseError;
+        
+        // Test MissingHeader error response
+        let error = XUserInfoError::MissingHeader;
+        let response = error.error_response();
+        assert_eq!(response.status(), actix_web::http::StatusCode::BAD_REQUEST);
+        
+        // Test InvalidHeader error response
+        let error = XUserInfoError::InvalidHeader;
+        let response = error.error_response();
+        assert_eq!(response.status(), actix_web::http::StatusCode::BAD_REQUEST);
     }
 }

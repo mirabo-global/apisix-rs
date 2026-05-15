@@ -10,7 +10,7 @@ Rust utilities for working with Apache APISIX, providing easy integration with p
 
 - **Framework Support**: Built-in extractors for `actix-web` and `axum`
 - **Type-Safe**: Decode and validate `x-userinfo` headers with type safety
-- **Zero-Copy**: Efficient base64 decoding and JSON parsing
+- **Efficient**: Fast base64 decoding and JSON parsing with minimal overhead
 - **Error Handling**: Comprehensive error types with helpful messages
 
 ## Installation
@@ -21,14 +21,14 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-apisix-rs = "0.1"
+apisix-rs = { version = "0.1", features = ["actix"] }
 ```
 
 ### For axum
 
 ```toml
 [dependencies]
-apisix-rs = { version = "0.1", default-features = false, features = ["axum"] }
+apisix-rs = { version = "0.1", features = ["axum"] }
 ```
 
 ## Usage
@@ -106,24 +106,104 @@ Apache APISIX can be configured to forward user information via the `x-userinfo`
 
 ## Error Handling
 
+### Default Error Response
+
+By default, extraction errors return a JSON response with 400 Bad Request:
+
+```json
+{
+  "error": "Missing x-userinfo header"
+}
+```
+
+**Actix-web example:**
+```rust
+#[get("/profile")]
+async fn profile(user: XUserInfo<UserInfo>) -> impl Responder {
+    // If header is invalid, automatically returns:
+    // HTTP 400 with {"error": "error message"}
+    format!("Hello, {}!", user.name)
+}
+```
+
+**Axum example:**
+```rust
+async fn profile(user: XUserInfo<UserInfo>) -> impl IntoResponse {
+    // If header is invalid, automatically returns:
+    // HTTP 400 with {"error": "error message"}
+    Json(user)
+}
+```
+
+### Custom Error Response
+
+For custom error handling, accept `Result` instead:
+
+**Actix-web:**
+```rust
+use actix_web::{HttpResponse, web::Json};
+use serde_json::json;
+
+#[get("/profile")]
+async fn profile(
+    user: Result<XUserInfo<UserInfo>, XUserInfoError>
+) -> HttpResponse {
+    match user {
+        Ok(user_info) => HttpResponse::Ok().json(user_info),
+        Err(e) => {
+            // Custom error response
+            HttpResponse::Unauthorized().json(json!({
+                "success": false,
+                "message": e.to_string(),
+                "code": "AUTH_FAILED"
+            }))
+        }
+    }
+}
+```
+
+**Axum:**
+```rust
+use axum::{http::StatusCode, response::{IntoResponse, Json}};
+use serde_json::json;
+
+async fn profile(
+    user: Result<XUserInfo<UserInfo>, XUserInfoError>
+) -> impl IntoResponse {
+    match user {
+        Ok(user_info) => Json(user_info).into_response(),
+        Err(e) => {
+            // Custom error response
+            let error_response = json!({
+                "success": false,
+                "message": e.to_string(),
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            });
+            (StatusCode::UNAUTHORIZED, Json(error_response)).into_response()
+        }
+    }
+}
+```
+
+### Error Types
+
 The library provides detailed error types:
 
 ```rust
-use apisix_rs::{XUserInfo, XUserInfoError};
-
-match XUserInfo::<UserInfo>::decode(header_value) {
-    Ok(user_info) => println!("User: {}", user_info.name),
-    Err(XUserInfoError::MissingHeader) => println!("Header not found"),
-    Err(XUserInfoError::Base64DecodeError(e)) => println!("Invalid base64: {}", e),
-    Err(XUserInfoError::JsonDecodeError(e)) => println!("Invalid JSON: {}", e),
-    Err(XUserInfoError::InvalidHeader) => println!("Invalid header format"),
+pub enum XUserInfoError {
+    MissingHeader,           // x-userinfo header not found
+    InvalidHeader,           // Header contains invalid UTF-8
+    Base64DecodeError(..),   // Base64 decoding failed
+    JsonDecodeError(..),     // JSON parsing failed
 }
 ```
 
 ## Features Flags
 
-- `actix` (default): Enable actix-web integration
+- `actix`: Enable actix-web integration
 - `axum`: Enable axum integration
+
+**Note**: You must explicitly enable either `actix` or `axum` feature.
 
 ## License
 

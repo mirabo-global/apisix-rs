@@ -12,7 +12,7 @@ categories = ["web-programming", "authentication"]
 
 
 [features]
-default = ["actix"]
+default = []
 actix = ["dep:actix-web"]
 axum = ["dep:axum"]
 

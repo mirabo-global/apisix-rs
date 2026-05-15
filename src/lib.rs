@@ -7,6 +7,7 @@ mod actix;
 #[cfg(feature = "axum")]
 mod axum;
 
+#[cfg(any(feature = "actix", feature = "axum"))]
 const X_USER_INFO_HEADER: &str = "x-userinfo";
 
 // Re-export public API

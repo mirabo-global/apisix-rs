@@ -1,15 +1,19 @@
 use axum::{
     extract::FromRequestParts,
     http::{StatusCode, request::Parts},
-    response::{IntoResponse, Response},
+    response::{IntoResponse, Response, Json},
 };
 use serde::de::DeserializeOwned;
+use serde_json::json;
 
 use crate::{X_USER_INFO_HEADER, error::XUserInfoError, user_info::XUserInfo};
 
 impl IntoResponse for XUserInfoError {
     fn into_response(self) -> Response {
-        (StatusCode::BAD_REQUEST, self.to_string()).into_response()
+        let error_json = json!({
+            "error": self.to_string()
+        });
+        (StatusCode::BAD_REQUEST, Json(error_json)).into_response()
     }
 }
 
@@ -149,5 +153,20 @@ mod tests {
         // Test deref
         assert_eq!(x_user_info.sub, "test sub");
         assert_eq!(x_user_info.name, "test name");
+    }
+
+    #[tokio::test]
+    async fn test_error_into_response() {
+        use axum::response::IntoResponse;
+        
+        // Test MissingHeader error response
+        let error = XUserInfoError::MissingHeader;
+        let response = error.into_response();
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+        
+        // Test InvalidHeader error response
+        let error = XUserInfoError::InvalidHeader;
+        let response = error.into_response();
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
     }
 }
