@@ -21,14 +21,14 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-apisix-rs = { version = "0.1", features = ["actix"] }
+apisix-rs = { version = "1.0", features = ["actix"] }
 ```
 
 ### For axum
 
 ```toml
 [dependencies]
-apisix-rs = { version = "0.1", features = ["axum"] }
+apisix-rs = { version = "1.0", features = ["axum"] }
 ```
 
 ## Usage
