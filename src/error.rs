@@ -8,9 +8,15 @@ pub enum XUserInfoError {
     #[error("invalid x-userinfo header")]
     InvalidHeader,
 
-    #[error("invalid x-userinfo, base64 decode error: {0}")]
+    #[error("x-userinfo header too large (max 16KB)")]
+    HeaderTooLarge,
+
+    #[error("x-userinfo decoded payload too large (max 16KB)")]
+    PayloadTooLarge,
+
+    #[error("invalid x-userinfo, base64 decode error")]
     Base64DecodeError(#[from] base64::DecodeError),
 
-    #[error("invalid x-userinfo, json decode error: {0}")]
+    #[error("invalid x-userinfo, json decode error")]
     JsonDecodeError(#[from] serde_json::Error),
 }

@@ -1,8 +1,6 @@
 use std::future::{Ready, ready};
 
-use actix_web::{
-    FromRequest, HttpRequest, HttpResponse, ResponseError, dev::Payload,
-};
+use actix_web::{FromRequest, HttpRequest, HttpResponse, ResponseError, dev::Payload};
 use serde::de::DeserializeOwned;
 use serde_json::json;
 
@@ -13,8 +11,7 @@ impl ResponseError for XUserInfoError {
         let error_json = json!({
             "error": self.to_string()
         });
-        HttpResponse::build(self.status_code())
-            .json(error_json)
+        HttpResponse::build(self.status_code()).json(error_json)
     }
 
     fn status_code(&self) -> actix_web::http::StatusCode {
@@ -161,12 +158,12 @@ mod tests {
     #[actix_rt::test]
     async fn test_error_response() {
         use actix_web::ResponseError;
-        
+
         // Test MissingHeader error response
         let error = XUserInfoError::MissingHeader;
         let response = error.error_response();
         assert_eq!(response.status(), actix_web::http::StatusCode::BAD_REQUEST);
-        
+
         // Test InvalidHeader error response
         let error = XUserInfoError::InvalidHeader;
         let response = error.error_response();

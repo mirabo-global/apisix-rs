@@ -1,7 +1,7 @@
 use axum::{
     extract::FromRequestParts,
     http::{StatusCode, request::Parts},
-    response::{IntoResponse, Response, Json},
+    response::{IntoResponse, Json, Response},
 };
 use serde::de::DeserializeOwned;
 use serde_json::json;
@@ -158,12 +158,12 @@ mod tests {
     #[tokio::test]
     async fn test_error_into_response() {
         use axum::response::IntoResponse;
-        
+
         // Test MissingHeader error response
         let error = XUserInfoError::MissingHeader;
         let response = error.into_response();
         assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
-        
+
         // Test InvalidHeader error response
         let error = XUserInfoError::InvalidHeader;
         let response = error.into_response();
