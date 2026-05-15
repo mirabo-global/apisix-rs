@@ -6,6 +6,9 @@ description = "Apisix utils"
 license = "MIT"
 homepage = "https://mirabo-global.com"
 repository = "https://github.com/mirabo-global/apisix-rs"
+readme = "README.md"
+keywords = ["apisix", "actix-web", "axum", "extractor", "api-gateway"]
+categories = ["web-programming", "authentication"]
 
 
 [features]
