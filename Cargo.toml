@@ -1,7 +1,7 @@
 [package]
 name = "apisix-rs"
 version = "0.1.2"
-edition = "2021"
+edition = "2024"
 description = "Apisix utils"
 license = "MIT"
 homepage = "https://mirabo-global.com"
@@ -11,13 +11,16 @@ repository = "https://github.com/mirabo-global/apisix-rs"
 [features]
 default = ["actix"]
 actix = ["dep:actix-web"]
+axum = ["dep:axum"]
 
 [dependencies]
-actix-web = { version = "^4.6", optional = true }
+actix-web = { version = "^4.13", optional = true }
+axum = { version = "^0.8", optional = true }
 serde = { version = "^1.0", features = ["derive"] }
 serde_json = { version = "^1.0"}
 thiserror = { version = "^1.0" }
-base64 = { version = "0.22.1" }
+base64 = { version = "^0.22" }
 
 [dev-dependencies]
 actix-rt = { version = "^2.9"}
+tokio = { version = "^1.0", features = ["full"] }

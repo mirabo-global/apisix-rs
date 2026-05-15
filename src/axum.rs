@@ -1,45 +1,28 @@
-use std::future::{Ready, ready};
-
-use actix_web::{
-    FromRequest, HttpRequest, HttpResponse, ResponseError, dev::Payload, http::header::ContentType,
+use axum::{
+    extract::FromRequestParts,
+    http::{StatusCode, request::Parts},
+    response::{IntoResponse, Response},
 };
 use serde::de::DeserializeOwned;
 
 use crate::{X_USER_INFO_HEADER, error::XUserInfoError, user_info::XUserInfo};
 
-impl ResponseError for XUserInfoError {
-    fn error_response(&self) -> HttpResponse {
-        HttpResponse::build(self.status_code())
-            .insert_header(ContentType::plaintext())
-            .body(self.to_string())
-    }
-
-    fn status_code(&self) -> actix_web::http::StatusCode {
-        actix_web::http::StatusCode::BAD_REQUEST
+impl IntoResponse for XUserInfoError {
+    fn into_response(self) -> Response {
+        (StatusCode::BAD_REQUEST, self.to_string()).into_response()
     }
 }
 
-impl<T> FromRequest for XUserInfo<T>
+impl<T, S> FromRequestParts<S> for XUserInfo<T>
 where
     T: DeserializeOwned,
+    S: Send + Sync,
 {
-    type Error = XUserInfoError;
-    type Future = Ready<Result<Self, Self::Error>>;
+    type Rejection = XUserInfoError;
 
-    fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
-        ready(req.try_into())
-    }
-}
-
-impl<T> TryFrom<&HttpRequest> for XUserInfo<T>
-where
-    T: DeserializeOwned,
-{
-    type Error = XUserInfoError;
-
-    fn try_from(req: &HttpRequest) -> Result<Self, Self::Error> {
-        let header = req
-            .headers()
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        let header = parts
+            .headers
             .get(X_USER_INFO_HEADER)
             .ok_or(XUserInfoError::MissingHeader)?
             .to_str()
@@ -52,12 +35,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use actix_web::test::TestRequest;
+    use axum::{body::Body, http::Request};
     use base64::prelude::*;
     use serde::{Deserialize, Serialize};
     use serde_json::json;
 
-    use crate::{X_USER_INFO_HEADER, error::XUserInfoError, user_info::XUserInfo};
+    use crate::{error::XUserInfoError, user_info::XUserInfo};
 
     #[derive(Deserialize, Debug, PartialEq, Serialize)]
     #[serde(rename_all = "snake_case")]
@@ -67,7 +50,7 @@ mod tests {
         iat: u64,
     }
 
-    #[actix_rt::test]
+    #[tokio::test]
     async fn test_x_user_info() {
         let header_raw = json!({
             "sub": "test sub",
@@ -76,37 +59,44 @@ mod tests {
         });
         let base64_encoded_header = BASE64_STANDARD.encode(header_raw.to_string().as_bytes());
 
-        let req = TestRequest::default()
-            .append_header((X_USER_INFO_HEADER, base64_encoded_header))
-            .to_http_request();
-        let mut payload = Payload::None;
+        let req = Request::builder()
+            .header(crate::X_USER_INFO_HEADER, base64_encoded_header)
+            .body(Body::empty())
+            .unwrap();
+
+        let (mut parts, _body) = req.into_parts();
         let x_user_info: XUserInfo<CustomXUserInfo> =
-            XUserInfo::from_request(&req, &mut payload).await.unwrap();
+            XUserInfo::from_request_parts(&mut parts, &())
+                .await
+                .unwrap();
 
         assert_eq!(x_user_info.0.sub, "test sub");
         assert_eq!(x_user_info.0.name, "test name");
         assert_eq!(x_user_info.0.iat, 1516239022);
     }
 
-    #[actix_rt::test]
-    async fn test_missing_header() {
-        let req = TestRequest::default().to_http_request();
-        let mut payload = Payload::None;
+    #[tokio::test]
+    async fn test_x_user_info_missing_header() {
+        let req = Request::builder().body(Body::empty()).unwrap();
+
+        let (mut parts, _body) = req.into_parts();
         let result: Result<XUserInfo<CustomXUserInfo>, _> =
-            XUserInfo::from_request(&req, &mut payload).await;
+            XUserInfo::from_request_parts(&mut parts, &()).await;
 
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), XUserInfoError::MissingHeader));
     }
 
-    #[actix_rt::test]
+    #[tokio::test]
     async fn test_invalid_base64() {
-        let req = TestRequest::default()
-            .append_header((X_USER_INFO_HEADER, "not-valid-base64!!!"))
-            .to_http_request();
-        let mut payload = Payload::None;
+        let req = Request::builder()
+            .header(crate::X_USER_INFO_HEADER, "not-valid-base64!!!")
+            .body(Body::empty())
+            .unwrap();
+
+        let (mut parts, _body) = req.into_parts();
         let result: Result<XUserInfo<CustomXUserInfo>, _> =
-            XUserInfo::from_request(&req, &mut payload).await;
+            XUserInfo::from_request_parts(&mut parts, &()).await;
 
         assert!(result.is_err());
         assert!(matches!(
@@ -115,17 +105,19 @@ mod tests {
         ));
     }
 
-    #[actix_rt::test]
+    #[tokio::test]
     async fn test_invalid_json() {
         let invalid_json = "not a json";
         let encoded = BASE64_STANDARD.encode(invalid_json.as_bytes());
 
-        let req = TestRequest::default()
-            .append_header((X_USER_INFO_HEADER, encoded))
-            .to_http_request();
-        let mut payload = Payload::None;
+        let req = Request::builder()
+            .header(crate::X_USER_INFO_HEADER, encoded)
+            .body(Body::empty())
+            .unwrap();
+
+        let (mut parts, _body) = req.into_parts();
         let result: Result<XUserInfo<CustomXUserInfo>, _> =
-            XUserInfo::from_request(&req, &mut payload).await;
+            XUserInfo::from_request_parts(&mut parts, &()).await;
 
         assert!(result.is_err());
         assert!(matches!(
@@ -134,7 +126,7 @@ mod tests {
         ));
     }
 
-    #[actix_rt::test]
+    #[tokio::test]
     async fn test_deref_works() {
         let header_raw = json!({
             "sub": "test sub",
@@ -143,12 +135,16 @@ mod tests {
         });
         let base64_encoded_header = BASE64_STANDARD.encode(header_raw.to_string().as_bytes());
 
-        let req = TestRequest::default()
-            .append_header((X_USER_INFO_HEADER, base64_encoded_header))
-            .to_http_request();
-        let mut payload = Payload::None;
+        let req = Request::builder()
+            .header(crate::X_USER_INFO_HEADER, base64_encoded_header)
+            .body(Body::empty())
+            .unwrap();
+
+        let (mut parts, _body) = req.into_parts();
         let x_user_info: XUserInfo<CustomXUserInfo> =
-            XUserInfo::from_request(&req, &mut payload).await.unwrap();
+            XUserInfo::from_request_parts(&mut parts, &())
+                .await
+                .unwrap();
 
         // Test deref
         assert_eq!(x_user_info.sub, "test sub");
