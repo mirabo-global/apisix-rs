@@ -137,11 +137,19 @@ async fn profile(user: XUserInfo<UserInfo>) -> impl IntoResponse {
 
 ### Custom Error Response
 
-For custom error handling, accept `Result` instead:
+There are two supported approaches for custom error handling:
+
+1. Keep using `XUserInfo<T>` and accept `Result<_, XUserInfoError>` in the handler.
+2. Use `XUserInfoWith<T, R>` if you want extractor-style usage with an application-defined rejection type.
+
+#### Option 1: Handle `Result<XUserInfo<T>, XUserInfoError>` in the handler
+
+This is the existing approach and still works.
 
 **Actix-web:**
 ```rust
-use actix_web::{HttpResponse, web::Json};
+use actix_web::{HttpResponse, get};
+use apisix_rs::{XUserInfo, XUserInfoError};
 use serde_json::json;
 
 #[get("/profile")]
@@ -149,41 +157,156 @@ async fn profile(
     user: Result<XUserInfo<UserInfo>, XUserInfoError>
 ) -> HttpResponse {
     match user {
-        Ok(user_info) => HttpResponse::Ok().json(user_info),
-        Err(e) => {
-            // Custom error response
-            HttpResponse::Unauthorized().json(json!({
-                "success": false,
-                "message": e.to_string(),
-                "code": "AUTH_FAILED"
-            }))
-        }
+        Ok(user_info) => HttpResponse::Ok().json(&user_info.0),
+        Err(e) => HttpResponse::Unauthorized().json(json!({
+            "success": false,
+            "message": e.to_string(),
+            "code": "AUTH_FAILED"
+        })),
     }
 }
 ```
 
 **Axum:**
 ```rust
-use axum::{http::StatusCode, response::{IntoResponse, Json}};
+use apisix_rs::{XUserInfo, XUserInfoError};
+use axum::{Json, http::StatusCode, response::IntoResponse};
 use serde_json::json;
 
 async fn profile(
     user: Result<XUserInfo<UserInfo>, XUserInfoError>
 ) -> impl IntoResponse {
     match user {
-        Ok(user_info) => Json(user_info).into_response(),
-        Err(e) => {
-            // Custom error response
-            let error_response = json!({
+        Ok(user_info) => Json(&user_info.0).into_response(),
+        Err(e) => (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({
                 "success": false,
                 "message": e.to_string(),
-                "timestamp": chrono::Utc::now().to_rfc3339()
-            });
-            (StatusCode::UNAUTHORIZED, Json(error_response)).into_response()
-        }
+            })),
+        )
+            .into_response(),
     }
 }
 ```
+
+#### Option 2: Use `XUserInfoWith<T, R>` for custom rejection types
+
+This keeps extractor-style handler signatures while letting the application choose its own rejection type.
+
+**Actix-web:**
+```rust
+use actix_web::{HttpResponse, ResponseError, get};
+use apisix_rs::{XUserInfoError, XUserInfoWith};
+use serde::Deserialize;
+use serde_json::json;
+
+#[derive(Deserialize, serde::Serialize)]
+struct UserInfo {
+    sub: String,
+    name: String,
+    email: String,
+}
+
+#[derive(Debug)]
+enum AppError {
+    Unauthorized,
+    BadRequest(String),
+}
+
+impl std::fmt::Display for AppError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unauthorized => write!(f, "unauthorized"),
+            Self::BadRequest(message) => write!(f, "{message}"),
+        }
+    }
+}
+
+impl From<XUserInfoError> for AppError {
+    fn from(err: XUserInfoError) -> Self {
+        match err {
+            XUserInfoError::MissingHeader => Self::Unauthorized,
+            _ => Self::BadRequest(err.to_string()),
+        }
+    }
+}
+
+impl ResponseError for AppError {
+    fn status_code(&self) -> actix_web::http::StatusCode {
+        match self {
+            Self::Unauthorized => actix_web::http::StatusCode::UNAUTHORIZED,
+            Self::BadRequest(_) => actix_web::http::StatusCode::BAD_REQUEST,
+        }
+    }
+
+    fn error_response(&self) -> HttpResponse {
+        HttpResponse::build(self.status_code()).json(json!({
+            "success": false,
+            "message": self.to_string(),
+        }))
+    }
+}
+
+#[get("/profile")]
+async fn profile(user: XUserInfoWith<UserInfo, AppError>) -> HttpResponse {
+    HttpResponse::Ok().json(&user.0.0)
+}
+```
+
+**Axum:**
+```rust
+use apisix_rs::{XUserInfoError, XUserInfoWith};
+use axum::{
+    Json,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+};
+use serde::Deserialize;
+use serde_json::json;
+
+#[derive(Deserialize, serde::Serialize)]
+struct UserInfo {
+    sub: String,
+    name: String,
+    email: String,
+}
+
+#[derive(Debug)]
+enum AppError {
+    Unauthorized,
+    BadRequest(String),
+}
+
+impl From<XUserInfoError> for AppError {
+    fn from(err: XUserInfoError) -> Self {
+        match err {
+            XUserInfoError::MissingHeader => Self::Unauthorized,
+            _ => Self::BadRequest(err.to_string()),
+        }
+    }
+}
+
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        let (status, message) = match self {
+            Self::Unauthorized => (StatusCode::UNAUTHORIZED, "missing x-userinfo header".to_owned()),
+            Self::BadRequest(message) => (StatusCode::BAD_REQUEST, message),
+        };
+
+        (status, Json(json!({
+            "success": false,
+            "message": message,
+        }))).into_response()
+    }
+}
+
+async fn profile(user: XUserInfoWith<UserInfo, AppError>) -> impl IntoResponse {
+    Json(&user.0.0)
+}
+```
+
+`XUserInfo<T>` remains the plug-and-play extractor with the built-in `XUserInfoError` response. `XUserInfoWith<T, R>` lets the application choose its own rejection type without reimplementing header parsing and decoding.
 
 ### Error Types
 

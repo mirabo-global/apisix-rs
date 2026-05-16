@@ -5,8 +5,9 @@ use axum::{
 };
 use serde::de::DeserializeOwned;
 use serde_json::json;
+use std::marker::PhantomData;
 
-use crate::{X_USER_INFO_HEADER, error::XUserInfoError, user_info::XUserInfo};
+use crate::{X_USER_INFO_HEADER, error::XUserInfoError, user_info::{XUserInfo, XUserInfoWith}};
 
 impl IntoResponse for XUserInfoError {
     fn into_response(self) -> Response {
@@ -36,6 +37,29 @@ where
     }
 }
 
+impl<T, S, R> FromRequestParts<S> for XUserInfoWith<T, R>
+where
+    T: DeserializeOwned,
+    S: Send + Sync,
+    R: From<XUserInfoError> + IntoResponse,
+{
+    type Rejection = R;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        let header = parts
+            .headers
+            .get(X_USER_INFO_HEADER)
+            .ok_or(XUserInfoError::MissingHeader)
+            .map_err(R::from)?
+            .to_str()
+            .map_err(|_| R::from(XUserInfoError::InvalidHeader))?;
+
+        XUserInfo::decode(header)
+            .map(|user| XUserInfoWith(user, PhantomData))
+            .map_err(R::from)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -44,7 +68,33 @@ mod tests {
     use serde::{Deserialize, Serialize};
     use serde_json::json;
 
-    use crate::{error::XUserInfoError, user_info::XUserInfo};
+    use crate::{error::XUserInfoError, user_info::{XUserInfo, XUserInfoWith}};
+
+    #[derive(Debug)]
+    enum AppError {
+        Unauthorized,
+        BadRequest,
+    }
+
+    impl From<XUserInfoError> for AppError {
+        fn from(value: XUserInfoError) -> Self {
+            match value {
+                XUserInfoError::MissingHeader => Self::Unauthorized,
+                _ => Self::BadRequest,
+            }
+        }
+    }
+
+    impl IntoResponse for AppError {
+        fn into_response(self) -> Response {
+            let status = match self {
+                Self::Unauthorized => StatusCode::UNAUTHORIZED,
+                Self::BadRequest => StatusCode::BAD_REQUEST,
+            };
+
+            status.into_response()
+        }
+    }
 
     #[derive(Deserialize, Debug, PartialEq, Serialize)]
     #[serde(rename_all = "snake_case")]
@@ -168,5 +218,40 @@ mod tests {
         let error = XUserInfoError::InvalidHeader;
         let response = error.into_response();
         assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_x_user_info_with_custom_rejection_success() {
+        let header_raw = json!({
+            "sub": "test sub",
+            "name": "test name",
+            "iat": 1516239022
+        });
+        let base64_encoded_header = BASE64_STANDARD.encode(header_raw.to_string().as_bytes());
+
+        let req = Request::builder()
+            .header(crate::X_USER_INFO_HEADER, base64_encoded_header)
+            .body(Body::empty())
+            .unwrap();
+
+        let (mut parts, _body) = req.into_parts();
+        let x_user_info: XUserInfoWith<CustomXUserInfo, AppError> =
+            XUserInfoWith::from_request_parts(&mut parts, &())
+                .await
+                .unwrap();
+
+        assert_eq!(x_user_info.sub, "test sub");
+        assert_eq!(x_user_info.name, "test name");
+    }
+
+    #[tokio::test]
+    async fn test_x_user_info_with_custom_rejection_missing_header() {
+        let req = Request::builder().body(Body::empty()).unwrap();
+
+        let (mut parts, _body) = req.into_parts();
+        let result: Result<XUserInfoWith<CustomXUserInfo, AppError>, _> =
+            XUserInfoWith::from_request_parts(&mut parts, &()).await;
+
+        assert!(matches!(result.unwrap_err(), AppError::Unauthorized));
     }
 }

@@ -1,5 +1,6 @@
 use base64::prelude::*;
 use serde::de::DeserializeOwned;
+use std::marker::PhantomData;
 use std::ops::Deref;
 use std::sync::OnceLock;
 
@@ -94,7 +95,7 @@ impl XUserInfoConfigBuilder {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```no_run
 /// apisix_rs::set_config(
 ///     apisix_rs::XUserInfoConfig::builder()
 ///         .max_header_size(32_768)
@@ -113,6 +114,11 @@ fn get_config() -> &'static XUserInfoConfig {
 
 #[derive(Debug)]
 pub struct XUserInfo<T>(pub T)
+where
+    T: DeserializeOwned;
+
+#[derive(Debug)]
+pub struct XUserInfoWith<T, R>(pub XUserInfo<T>, pub PhantomData<R>)
 where
     T: DeserializeOwned;
 
@@ -150,6 +156,26 @@ where
         }
 
         Ok(XUserInfo(serde_json::from_slice(&base64_decoded)?))
+    }
+}
+
+impl<T, R> Deref for XUserInfoWith<T, R>
+where
+    T: DeserializeOwned,
+{
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0.0
+    }
+}
+
+impl<T, R> From<XUserInfo<T>> for XUserInfoWith<T, R>
+where
+    T: DeserializeOwned,
+{
+    fn from(value: XUserInfo<T>) -> Self {
+        Self(value, PhantomData)
     }
 }
 

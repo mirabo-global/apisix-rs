@@ -12,4 +12,4 @@ const X_USER_INFO_HEADER: &str = "x-userinfo";
 
 // Re-export public API
 pub use error::XUserInfoError;
-pub use user_info::{XUserInfo, XUserInfoConfig, XUserInfoConfigBuilder, set_config};
+pub use user_info::{XUserInfo, XUserInfoConfig, XUserInfoConfigBuilder, XUserInfoWith, set_config};

@@ -1,10 +1,11 @@
 use std::future::{Ready, ready};
+use std::marker::PhantomData;
 
 use actix_web::{FromRequest, HttpRequest, HttpResponse, ResponseError, dev::Payload};
 use serde::de::DeserializeOwned;
 use serde_json::json;
 
-use crate::{X_USER_INFO_HEADER, error::XUserInfoError, user_info::XUserInfo};
+use crate::{X_USER_INFO_HEADER, error::XUserInfoError, user_info::{XUserInfo, XUserInfoWith}};
 
 impl ResponseError for XUserInfoError {
     fn error_response(&self) -> HttpResponse {
@@ -49,6 +50,41 @@ where
     }
 }
 
+impl<T, R> FromRequest for XUserInfoWith<T, R>
+where
+    T: DeserializeOwned,
+    R: From<XUserInfoError> + ResponseError + 'static,
+{
+    type Error = R;
+    type Future = Ready<Result<Self, Self::Error>>;
+
+    fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
+        ready(req.try_into())
+    }
+}
+
+impl<T, R> TryFrom<&HttpRequest> for XUserInfoWith<T, R>
+where
+    T: DeserializeOwned,
+    R: From<XUserInfoError> + ResponseError,
+{
+    type Error = R;
+
+    fn try_from(req: &HttpRequest) -> Result<Self, Self::Error> {
+        let header = req
+            .headers()
+            .get(X_USER_INFO_HEADER)
+            .ok_or(XUserInfoError::MissingHeader)
+            .map_err(R::from)?
+            .to_str()
+            .map_err(|_| R::from(XUserInfoError::InvalidHeader))?;
+
+        XUserInfo::decode(header)
+            .map(|user| XUserInfoWith(user, PhantomData))
+            .map_err(R::from)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -57,7 +93,40 @@ mod tests {
     use serde::{Deserialize, Serialize};
     use serde_json::json;
 
-    use crate::{X_USER_INFO_HEADER, error::XUserInfoError, user_info::XUserInfo};
+    use crate::{X_USER_INFO_HEADER, error::XUserInfoError, user_info::{XUserInfo, XUserInfoWith}};
+
+    #[derive(Debug)]
+    enum AppError {
+        Unauthorized,
+        BadRequest,
+    }
+
+    impl std::fmt::Display for AppError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                Self::Unauthorized => write!(f, "unauthorized"),
+                Self::BadRequest => write!(f, "bad request"),
+            }
+        }
+    }
+
+    impl From<XUserInfoError> for AppError {
+        fn from(value: XUserInfoError) -> Self {
+            match value {
+                XUserInfoError::MissingHeader => Self::Unauthorized,
+                _ => Self::BadRequest,
+            }
+        }
+    }
+
+    impl ResponseError for AppError {
+        fn status_code(&self) -> actix_web::http::StatusCode {
+            match self {
+                Self::Unauthorized => actix_web::http::StatusCode::UNAUTHORIZED,
+                Self::BadRequest => actix_web::http::StatusCode::BAD_REQUEST,
+            }
+        }
+    }
 
     #[derive(Deserialize, Debug, PartialEq, Serialize)]
     #[serde(rename_all = "snake_case")]
@@ -168,5 +237,35 @@ mod tests {
         let error = XUserInfoError::InvalidHeader;
         let response = error.error_response();
         assert_eq!(response.status(), actix_web::http::StatusCode::BAD_REQUEST);
+    }
+
+    #[actix_rt::test]
+    async fn test_x_user_info_with_custom_error_success() {
+        let header_raw = json!({
+            "sub": "test sub",
+            "name": "test name",
+            "iat": 1516239022
+        });
+        let base64_encoded_header = BASE64_STANDARD.encode(header_raw.to_string().as_bytes());
+
+        let req = TestRequest::default()
+            .append_header((X_USER_INFO_HEADER, base64_encoded_header))
+            .to_http_request();
+        let mut payload = Payload::None;
+        let x_user_info: XUserInfoWith<CustomXUserInfo, AppError> =
+            XUserInfoWith::from_request(&req, &mut payload).await.unwrap();
+
+        assert_eq!(x_user_info.sub, "test sub");
+        assert_eq!(x_user_info.name, "test name");
+    }
+
+    #[actix_rt::test]
+    async fn test_x_user_info_with_custom_error_missing_header() {
+        let req = TestRequest::default().to_http_request();
+        let mut payload = Payload::None;
+        let result: Result<XUserInfoWith<CustomXUserInfo, AppError>, _> =
+            XUserInfoWith::from_request(&req, &mut payload).await;
+
+        assert!(matches!(result.unwrap_err(), AppError::Unauthorized));
     }
 }
